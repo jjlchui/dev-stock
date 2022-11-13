@@ -1,0 +1,50 @@
+I have a pandas column df.a. which have values of 1, 0, -1, and compare to a new column df.c. The requirement is as follows:
+
+The count(df.c) must be between -1 and 1. The requirement is:
+1. If the df.a is greater than the previous df.c by 1 or less than the previous df.c by -1, the previous df.c will be put into the current df.c. 
+2. Otherwise, if df.a is equal to zero. it will also put the previous df.c to current df.c. 
+3. If df.a equal to  1 or -1, it will calculate df.a with previous df.c and put into current df.c
+
+
+My coding is as follows:
+
+Initialize df.c as df['a'][0] == 1
+
+
+a=df['a'] + df['count'].shift(1) < -1 
+b=df['a'] + df['count'].shift(1) > 1
+
+c=df['count'].shift(1) == -1
+d=df['count'].shift(1) == 1
+e=df['count'].shift(1) == '0'
+
+g=df['a']=='-1'
+h=df['a']=='1'
+i=df['a']=='0'
+
+conditions=[a|b|i&d|i&c,h&e|g&e,e&i|c&h|d&g]
+choices=[df['count'].shift(1), df['a'], '0']
+df['count'] = np.select(conditions, choices, default=df['count'])
+ 
+
+My question is when I compare df['a'][4], df['count'][6] should be (-1, '1') but the result is 1, it should fall into (e) -1 + 1 = 0. Any suggestion? Have I done something wrong.
+
+	a	c	expected result
+
+0	1	nan	1
+1	1	1.0	1
+2	0	1.0	1
+3	1	1.0	1
+4	-1	0	0 
+5	0	1.0	0
+6	1	1.0	1
+7	1	1.0	1
+8	-1	0	0
+9	-1	0	-1
+10	-1	0	-1
+11	0	1.0	-1
+12	-1	0	-1
+13	1	1.0	0
+14	0	1.0	0
+15	1	1.0	1
+
