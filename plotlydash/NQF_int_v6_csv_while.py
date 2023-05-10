@@ -183,7 +183,7 @@ def Save_csv(file, filename, mode):
     cwd = os.getcwd()
     path = os.path.dirname(cwd)
 
-    file_path = path + "\\stock\\data\\"
+    file_path = path + "\\data\\"
     #time_stamp = usny_curtime()
 
     time_stamp = datetime.datetime.now() .strftime('%Y-%m-%d %H:%M:%S')
@@ -200,7 +200,7 @@ def Save_feather(file, filename):
     cwd = os.getcwd()
     path = os.path.dirname(cwd)
 
-    file_path = path + "\\stock\\data\\"
+    file_path = path + "\\data\\"
     #time_stamp = usny_curtime()
 
     time_stamp = datetime.datetime.now() .strftime('%Y-%m-%d %H:%M:%S')

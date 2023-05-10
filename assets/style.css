@@ -1,17 +1,19 @@
 body {
   margin: 0;
-  background-color: rgba(12, 12, 12, 0.8)
+  background-color: rgba(255, 255, 255, 0.0)
 }
 
 .title_image {
   display: flex;
   flex-direction: row;
+  white-space: pre;
   margin-top: 2px;
 }
 
 .title {
   display: flex;
   flex-direction: row;
+  white-space: pre;
   white-space: pre;
   font-family: "sans-serif";
 }
@@ -20,6 +22,7 @@ body {
 .logo_title {
   display: flex;
   flex-direction: row;
+  white-space: pre;
   gap: 3px;
   flex: 1;
   margin-left: 2px;
@@ -31,14 +34,11 @@ body {
 .stock_label{
   display: flex;
   flex-direction: row;
+  white-space: pre;
   margin-top: 5px;
 }
 
-.profit_label{
-  display: flex;
-  flex-direction: row;
-  margin-top: 3px;
-}
+
 
 .stock_score{
   display: flex;
@@ -51,6 +51,7 @@ body {
 .profit_label{
   display: flex;
   flex-direction: row;
+  white-space: pre;
   margin-top: 10px;
 }
 
@@ -69,6 +70,7 @@ body {
   white-space: pre;
   margin-top: 0px;
   margin-left: 10px;
+  white-space: pre;
 }
 
 
@@ -91,30 +93,35 @@ body {
 .buy_sell_b{
   display: flex;
   flex-direction: row;
+  white-space: pre;
   margin-left: 0px;
 }
 
 .buy_sell_s{
   display: flex;
   flex-direction: row;
+  white-space: pre;
   margin-left: 20px;
 }
 
 .buy_sell_p{
   display: flex;
   flex-direction: row;
+  white-space: pre;
   margin-left: 100px;
 }
 
 .profit_img{
   display: flex;
   flex-direction: row;
+  white-space: pre;
   gap: 16px;
 }
 
 .stock_score_container{
   color: white;
   flex-direction: row;
+  white-space: pre;
   display: flex;
   gap: 5px;
   flex: 10;
@@ -159,8 +166,9 @@ body {
 
 .title_date_time_container {
   display: flex;
-  flex-wrap: wrap;
+  white-space: pre;
   flex-direction: row;
+  flex-wrap: wrap;
   background-color: rgba(12, 12, 12, 0.8);
   top: 0;
   width: 100%;

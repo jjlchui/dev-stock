@@ -8,10 +8,8 @@ from plotlydash import Max_Min_line
 from plotlydash import macd_ma
 from plotlydash import RegressionRoll
 from plotlydash import Renko
-from plotlydash import Renko_tws
-from plotlydash import csv_display_tws
-from plotlydash import tws_reconcile
-from plotlydash import Renko_tws_bb
+from plotlydash import Renko_block
+from plotlydash import BBand
 import os  
 import time
 
@@ -25,10 +23,8 @@ Max_Min_line.create_dash(app)
 macd_ma.create_dash(app)
 RegressionRoll.create_dash(app)
 Renko.create_dash(app)
-Renko_tws.create_dash(app)
-csv_display_tws.create_dash(app)
-tws_reconcile.create_dash(app)
-Renko_tws_bb.create_dash(app)
+Renko_block.create_dash(app)
+BBand.create_dash(app)
 
 
 

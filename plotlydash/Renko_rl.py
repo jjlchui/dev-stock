@@ -1,8 +1,9 @@
-from dash import html,dash_table
+from dash import html, dash_table
 from dash import dcc
 import dash_core_components as dcc
 from dash.dependencies import Input, Output, State
 from flask_caching.backends import FileSystemCache
+from dash_extensions.callback import CallbackCache, Trigger
 import plotly.graph_objects as go
 import dash
 import os
@@ -15,8 +16,10 @@ from decimal import Decimal
 from scipy.stats import linregress
 import pytz
 from flask_caching import Cache
-#import feather
-
+import feather
+from stocktrends import Renko
+from datetime import timedelta
+import math
 
 def usny_curtime():
     nyc_datetime = datetime.now(pytz.timezone('US/Eastern'))
@@ -24,9 +27,35 @@ def usny_curtime():
     time_stamp = nyc_datetime.strftime(fmt)
     return time_stamp
 
+def ATR(DF, n=14):
+    "function to calculate True Range and Average True Range"
+    df = DF.copy()
+    df["H-L"] = df["High"] - df["Low"]
+    df["H-PC"] = abs(df["High"] - df["Close"].shift(1))
+    df["L-PC"] = abs(df["Low"] - df["Close"].shift(1))
+    df["TR"] = df[["H-L","H-PC","L-PC"]].max(axis=1, skipna=False)
+    df["ATR"] = df["TR"].ewm(com=n, min_periods=n).mean()
+    return df["ATR"]
+
+def renko_DF(DF):
+    "function to convert ohlc data into renko bricks"
+    df_r = DF[['Datetime', 'Open', 'High', 'Low', 'Close', 'Volume']].copy()
+    #df_r.reset_index(inplace=True)
+    df_r.columns = ["date","open","high","low","close","volume"]
+    df2 = Renko(df_r)
+    df2.brick_size = 12
+    renko_df = df2.get_ohlc_data() #if using older version of the library please use get_bricks() instead
+    renko_df["bar_num"] = np.where(renko_df["uptrend"]==True,1,np.where(renko_df["uptrend"]==False,-1,0))
+    for i in range(1,len(renko_df["bar_num"])):
+        if renko_df["bar_num"][i]>0 and renko_df["bar_num"][i-1]>0:
+            renko_df["bar_num"][i]+=renko_df["bar_num"][i-1]
+        elif renko_df["bar_num"][i]<0 and renko_df["bar_num"][i-1]<0:
+            renko_df["bar_num"][i]+=renko_df["bar_num"][i-1]
+    renko_df.drop_duplicates(subset="date",keep="last",inplace=True)
+    return renko_df 
 
 
-
+    
 def bs_count(df,a, as1, idx):
     
     chk_repeat=[0]*(idx)
@@ -63,7 +92,7 @@ def bs_count(df,a, as1, idx):
 
 def create_dash(flask_app):
 
-        app=dash.Dash(server=flask_app, name="stock_dash", url_base_pathname=("/maxminline/"), prevent_initial_callbacks=True)
+        app=dash.Dash(server=flask_app, name="stock_dash", url_base_pathname=("/renko_rl/"), prevent_initial_callbacks=True)
 
 
         ### Preformance Turning
@@ -73,7 +102,7 @@ def create_dash(flask_app):
 
         app.config.suppress_callback_exceptions = True
         timeout = 20
-        #cc = CallbackCache(cache=FileSystemCache(cache_dir="cache"))
+       #cc = CallbackCache(cache=FileSystemCache(cache_dir="cache"))
 
         #app.css.append_css({"external_url": "/static/css/style.css"})
         app.css.config.serve_locally = True
@@ -153,35 +182,26 @@ def create_dash(flask_app):
 
                   ], className = 'buy_sell_s'),
 
-                html.Div([
-                   html.Div([
-                       html.Div([
-                           html.P('Buy/Short pft.:',
-                                   style = {'color': '#bebfd6', 'font-size':'8px'},
+                 html.Div([
+                            html.P('Buy/Short pft.:',
+                                    style = {'color': '#bebfd6', 'font-size':'8px'},
+                                    className = 'stock_label'),
+                            html.P(['('], style = {'color': '#bebfd6', 'font-size':'12px'},
                                    className = 'profit_label'),
-                           html.P(['('], style = {'color': '#bebfd6', 'font-size':'14px'},
-                                  className = 'stock_label'),
-                            html.Div(id = 'tot_profit',
-                                    style = {'color': '#bebfd6', 'font-size':'14px'},
-                                    className = 'stock_label'),
-                            html.P(['+'], style = {'color': '#bebfd6', 'font-size':'14px'},
-                                   className = 'stock_label'),
-                            html.Div(id = 'tot_long',
-                                    style = {'color': '#bebfd6', 'font-size':'14px'},
-                                    className = 'stock_label'),
-                            html.P([')'], style = {'color': '#bebfd6', 'font-size':'14px'},
-                                   className = 'stock_label'),
-                        ],className = 'stock_profit'),
+                             html.Div(id = 'tot_profit',
+                                     className = 'stock_label'),
+                             html.P(['+'], style = {'color': '#bebfd6', 'font-size':'12px'},
+                                    className = 'profit_label'),
+                             html.Div(id = 'tot_long',
+                                     className = 'stock_label'),
+                             html.P([')'], style = {'color': '#bebfd6', 'font-size':'12px'},
+                                    className = 'profit_label'),
+                             html.Div(id = 'profit_t',
+                                     className = 'profit'),
+                             html.Div(id = 'Img_t',
+                                     className = 'profit_img'),
 
-
-                    html.Div(id = 'profit'),
-                    ],className = 'stock_score_label'),
-
-
-                  html.Div([
-                      html.Div(id = 'Img'),
-                      ],className = 'profit_img'),
-                  ], className = 'buy_sell_p'),
+                     ],className = 'buy_sell_p'),
                ], className = 'stock_score_container'),
 
 
@@ -190,13 +210,14 @@ def create_dash(flask_app):
                         className = 'adjust_date_time'),
              ], className = 'title_date_time_container'),
 
+
              html.Div([
                  dcc.Interval(id = 'update_date_time',
                         interval = 1000,
                         n_intervals = 0)
              ]),
            ##### button
-
+                   
 
 
 
@@ -286,12 +307,12 @@ def create_dash(flask_app):
                     p_filename = "_feather_stock_data.feather"
 
                     #time_stamp = datetime.now() - datetime.timedelta(hours=13)
-                    #time_stamp =  datetime.now().strftime('%Y-%m-%d')
-                    time_stamp = usny_curtime()
+                    time_stamp =  datetime.now().strftime('%Y-%m-%d')
+                    #time_stamp = usny_curtime()
 
-                    filename = os.path.join(str(time_stamp[0:11]) +"NQ=F USTime" + p_filename)
-                    #filename = "2022-09-21 NQ=F USTime_out_stock_data.csv"
-                    #filename = "2022-10-13  NQ=F USTime_out_stock_data.feather"
+                    filename = os.path.join(str(time_stamp[0:11]) +" NQ=F USTime" + p_filename)
+                    #filename = "2022-10-13 NQ=F USTime_out_stock_data.csv"
+                    #filename = "2022-11-12 NQ=F USTime_feather_stock_data.feather"
                     cwd = os.getcwd()
                     path = os.path.dirname(cwd)
 
@@ -299,9 +320,9 @@ def create_dash(flask_app):
                     file_path = path + "\\stock\\data\\"
                     file = os.path.join(file_path, filename)
 
-                    df = pd.read_csv(file, names =['Datetime','Open','High','Low','Close', 'Volume'])
-                    #df = pd.read_feather(file)
-                    #df.columns =['Datetime','Open','High','Low','Close', 'Volume']
+                    #df = pd.read_csv(file, names =['Datetime','Open','High','Low','Close', 'Volume'])
+                    df = pd.read_feather(file)
+                    df.columns =['Datetime','Open','High','Low','Close', 'Volume']
                     
                     """
                     csv_file="D:\\Development\\flask dev\\stock\\data\\test.csv"
@@ -341,117 +362,150 @@ def create_dash(flask_app):
                  Input('df_value', 'data')])
         
         @cache.memoize(timeout=timeout)
-        def maxminline_strategy(n_intervals, data):
+        def renko_rl_strategy(n_intervals, data):
                 if n_intervals == 0:
                     raise PreventUpdate
                 else:
             
                     df = pd.DataFrame(data)
                 
-                    ##### MA #####
-                    #df['MA10'] = df.Close.rolling(10).mean()
-                    slopes10 = df.Close.rolling(10).apply(lambda s: linregress(s.reset_index())[0])
-                    #slopes20 = df['Close'].rolling(20).apply(lambda s: linregress(s.reset_index())[0])
+     
+                
+                
+                    ###########RENKO########
                     
-                    df['slopes10'] = (np.rad2deg(np.arctan(np.array(slopes10))))
-                    #df['slopes20'] = (np.rad2deg(np.arctan(np.array(slopes20))))
-  
-                    df['MA10'] = df.Close.rolling(10).mean()
-                    df['MA20'] = df.Close.rolling(20).mean()                  
-  
-                    df['ma1s1'] = df['MA10'].shift(-1)
-                    df['ma1s2'] = df['MA10'].shift(-2)
-                    df['ma2s1'] = df['MA20'].shift(-1)
-                    df['ma2s2'] = df['MA20'].shift(-2)
+                    df_renko = renko_DF(df)       
+                    df_renko_final = df_renko.groupby('date').first()
+                    df_renko_final = df_renko_final.reset_index()
+                    df_renko_final['dates1'] = df_renko_final['date'].shift()
+                    
  
                     
-                    df['ma_cross_pt'] = np.where((((df.MA10 <= df.MA20) & (df.ma1s1 > df.ma2s1)) | 
-                                ((df.MA10 >= df.MA20) & (df.ma1s1 < df.ma2s1))),
-                                "y", "NaN")
-
-                    
-                    ##### MACD #####
-                
-                    df['vol_gt2'] = np.where(((df['MACD_12_26_9'] > 2) | (df['MACD_12_26_9'] < -2)), "y", "n")
-                    df['macdh_vol_gt1'] = np.where(((df['MACDh_12_26_9'] > 1) | (df['MACDh_12_26_9'] < -1)), "y", "n")
-                
-                
-                    df['macd_above_up'] = np.where((df['MACD_12_26_9'] > 0)
-                                                   & (df['MACDs_12_26_9'] > 0)
-                                                   & (df['MACD_12_26_9'] > df['MACDs_12_26_9'] )
-                                                   , "y", "n")
-                    df['macd_above_dn'] = np.where((df['MACD_12_26_9'] > 0)
-                                                   & (df['MACDs_12_26_9'] > 0)
-                                                   & (df['MACD_12_26_9'] < df['MACDs_12_26_9'] )
-                                                   , "y", "n")
-                
-                    df['macd_below_up'] = np.where((df['MACD_12_26_9'] < 0)
-                                                   & (df['MACDs_12_26_9'] < 0)
-                                                   & (df['MACD_12_26_9'] > df['MACDs_12_26_9'] )
-                                                   , "y", "n")
-                
-                    df['macd_below_dn'] = np.where((df['MACD_12_26_9'] < 0)
-                                                   & (df['MACDs_12_26_9'] < 0)
-                                                   & (df['MACD_12_26_9'] < df['MACDs_12_26_9'] )
-                                                   , "y", "n")
-                
-                
-                    df['macds1'] = df['MACD_12_26_9'].shift(-1)
-                    df['macdss1'] = df['MACDs_12_26_9'].shift(-1)
-                    
-                    df['macd_up_cr_pt'] = np.where((((df.MACD_12_26_9 <= df.MACDs_12_26_9) & (df.macds1 > df.macdss1)) | 
-                                ((df.MACD_12_26_9 >= df.MACDs_12_26_9) & (df.macds1  < df.macdss1))), "y", "n")
-                    df['macd_dn_cr_pt'] = np.where((((df.MACD_12_26_9 <= df.MACDs_12_26_9) & (df.macds1 > df.macdss1)) | 
-                                ((df.MACD_12_26_9  >= df.MACDs_12_26_9) & (df.macds1 < df.macdss1))), "y", "n")
-                
                     ############### NEW CHANGE of MIN/MAX start
                     
-                    #### MAX ###
-                    
                     df.Datetime = pd.to_datetime(df.Datetime)
-                    """
-                    idx_max = df.resample('20min', on='Datetime')["Close"].agg(lambda x: np.nan if x.isna().all() else x.idxmax())                
-                    max_close_idx = np.where(df.index.isin(idx_max), df.Close, np.nan)
-                    df['max_close_idx'] = max_close_idx
-                    df['idx_max_f'] = np.where(((df['ma_cross_pt'] == 'y') & (df['max_close_idx'] != "nan")), df['max_close_idx'], np.nan)
-                    """
-    
-                    val_max = df.resample('20min', on='Datetime')["Close"].agg(lambda x: np.nan if x.isna().all() else x.max())
-                    max_close_val = np.where(df.Close.isin(val_max), df.Close, np.nan)
-                    df['max_close_val'] = max_close_val
-                    df['idx_max_f'] = np.where(((df['ma_cross_pt'] == 'y') & (df['max_close_val'] == df['Close'])), df['Close'], np.nan)
-                    #### MIN ###
-                    """
-                    idx_min = df.resample('20min', on='Datetime')["Close"].agg(lambda x: np.nan if x.isna().all() else x.idxmin())
-                    min_close_idx = np.where(df.index.isin(idx_min), df.Close, np.nan)
-                    df['min_close_idx'] = min_close_idx
-                    df['idx_min_f'] = np.where(((df['ma_cross_pt'] == 'y') & (df['min_close_idx'] != "nan")), df['min_close_idx'], np.nan)
-                    """
                     
-                    val_min = df.resample('20min', on='Datetime')["Close"].agg(lambda x: np.nan if x.isna().all() else x.min())
-                    min_close_val= np.where(df.Close.isin(val_min), df.Close, np.nan)
-                    df['min_close_val'] = min_close_val
-                    df['idx_min_f'] = np.where(((df['ma_cross_pt'] == 'y') & (df['min_close_val']  == df['Close'])), df['Close'], np.nan)
+                    ### Select Time ###        
+                    #idx_max_tmp = df.resample('20min', on='Datetime')["Close"].idxmax().reset_index()\
+                                    #.rename(columns={'Close':'idx'})
+                    #val_max_tmp = df.resample('20min', on='Datetime')["Close"].max().reset_index()\
+                                    #.rename(columns={'Close':'idx'})
+                    
+                    ##### set the window ######
+                    """
+                    start_date = idx_max_tmp.Datetime
+                    end_date = start_date + timedelta(minutes=20)
+                    start_date = pd.to_datetime(start_date)
+                    end_date = pd.to_datetime(end_date)
+                    start_date = start_date.to_frame()
+                    end_date = end_date.to_frame()
+                    
+                    
+                    sel_datetime = df[df['Datetime'].between(start_date['Datetime'].iloc[-1], end_date['Datetime'].iloc[-1])]
+                    
+                    df_renko_final.date = pd.to_datetime(df_renko_final.date)
+                    renko_result_sel = df_renko_final[df_renko_final['date'].between(start_date['Datetime'].iloc[-1], end_date['Datetime'].iloc[-1])]
+                    """
+                    #renko_result_dt = renko_result_dt.reset_index()
+                    """
+                    status = np.where(sel_datetime['Close'] > sel_datetime['Close'].shift(), 'up', 'dn')
+                    sel_datetime['status'] = status
+                    """
+                    df_renko_final.date = pd.to_datetime(df_renko_final.date)
+                    df=pd.merge(df, df_renko_final[['date','uptrend', 'dates1']],left_on='Datetime', right_on="date", how="outer")
+                    df['uptrend'].bfill(inplace=True)
+                    
+                    #### MIN - Buy - Down ###
+                    
+                    min_Close = np.where(((df['uptrend'] == True) & (df['uptrend'].shift() == False))
+                                         , df['Close'] , np.nan)
+                    df['min_Close'] = min_Close
+                    
+                    #### MAX - Sell - Up ###
+                    max_Close = np.where(((df['uptrend'] == False) & (df['uptrend'].shift() == True))
+                                         , df['Close'] , np.nan)
+                    
+                    df['max_Close'] = max_Close
+                    
+                    
+                    #df = pd.concat([df,sel_datetime], axis=1).sort_index()
+                    #df = pd.merge(df, sel_datetime[['Datetime','status', 'max_Close', 'min_Close']], left_on='Datetime', right_on="Datetime", how="outer")
+
                 
                     ############### NEW CHANGE of MIN/MAX end
                 
                     ####### BUY #######
-                    T_Buy = np.where((df['Close'] == df['idx_min_f'] ) &
-                                    (df['macdh_vol_gt1'] == 'y') &
-                                    ((df['slopes10'] > -10) & (df['slopes10'] < 10) ).any() &
-                                    ((df['macd_below_dn'] == 'y') | (df['macd_above_dn'] == 'y'))
+                    T_Buy = np.where((df['Close'] == df['min_Close'] ) 
+                                    #(df['macd_vol_gt1'] == 'y') &
+                                    #((df['slopes10'] < 10) ) &
+                                    #((df['macd_below_dn'] == 'y') | (df['macd_above_dn'] == 'y'))
                                     ,df['Close'], np.nan)
-                    Buylist = np.where((T_Buy==df['Close']), 1, 0)  
+                    df['T_Buy'] = T_Buy
+                    Buylist = np.where((T_Buy==df['Close']), 1, 0)
                     
                     ####### SELL #######
                 
-                    T_Sell = np.where((df['Close'] == df['idx_max_f']) &
-                                   (df['macdh_vol_gt1'] == 'y') &
-                                   ((df['slopes10'] > -10) & (df['slopes10'] < 10) ).any() &
-                                   ((df['macd_above_up'] == 'y') | (df['macd_below_up'] == 'y'))
+                    T_Sell = np.where((df['Close'] == df['max_Close']) 
+                                     #(df['macd_vol_gt1'] == 'y') &
+                                     #((df['slopes10'] > -10) ) &
+                                     #((df['macd_above_up'] == 'y') | (df['macd_below_up'] == 'y'))
                                      ,df['Close'], np.nan)
-                
+                    
+                    df['T_Sell'] = T_Sell               
                     Selllist = np.where((T_Sell==df['Close']), -1, 0)
+                    
+                    #### //add stop loss start// ####
+                    """
+                    stop_loss_limit = 30.00
+                    T_Sell[13] = df.Close.iloc[13]
+
+                   
+ 
+                    df['Buy_sl'] = T_Buy.copy()
+                    df['Sell_sl'] =T_Sell.copy()
+                    df['Buy_sl_count'] = df['Buy_sl'].fillna(0)
+                    df['Buy_sl_count'] = np.where(df['Buy_sl_count'] == 0, 0, 1)
+                    df['Buy_sl_count'] = np.add.accumulate(df['Buy_sl_count'] )
+                    df['Sell_sl_count'] = df['Sell_sl'].fillna(0)
+                    df['Sell_sl_count'] = np.where(df['Sell_sl_count'] == 0, 0, 1)
+                    df['Sell_sl_count'] = np.add.accumulate(df['Sell_sl_count'] )
+                    
+                    
+                    def chk_limit(selector, Buy_sl, Sell_sl): 
+                        if (selector == "Buy"):
+                            lose_limit = (Buy_sl.astype(float) - stop_loss_limit)
+                        else:
+                            lose_limit = (Sell_sl.astype(float) + stop_loss_limit)
+                        return lose_limit
+                    
+                    df['Buy_loss_limit']  = np.where((df['Buy_sl_count'] - df['Sell_sl_count']) == 1 , chk_limit("Buy", df['Buy_sl'], df['Sell_sl']), np.nan)
+                    df['Sell_loss_limit']= np.where((df['Sell_sl_count'] - df['Buy_sl_count']) == 1 , chk_limit("Sell", df['Buy_sl'], df['Sell_sl']), np.nan)
+                                        
+                    
+                    df['Buy_loss_limit']  = df['Buy_loss_limit'].ffill()
+                    df['Sell_loss_limit']  = df['Sell_loss_limit'].ffill()
+                    
+                    df['Sell_n_f'] = np.where(#(df['Buy_n'].count() > df['Sell_n'].count()) & 
+                                         ((df['Close'].astype(float) < df['Buy_loss_limit'].astype(float)) &
+                                         (df['Close'].shift().astype(float) > df['Buy_loss_limit'].astype(float)))
+                                        , df.Close, T_Sell)
+                    T_Sell = df['Sell_n_f']
+            
+                    df['Buy_n_f'] = np.where(#(df['Sell_n'].count() > df['Buy_n'].count()) &
+                                        ((df['Close'].astype(float)> df['Sell_loss_limit'].astype(float)) & 
+                                        (df['Close'].shift().astype(float) < df['Sell_loss_limit'].astype(float)))
+                                        , df.Close, T_Buy)
+                    T_Buy = df['Buy_n_f']   
+                        
+                   
+                    #Buy_loss_limit =  df.apply(lambda x: chk_limit("Buy", 'Buy_sl', 'Sell_sl') if('Buy_sl_count' > 'Sell_sl_count') else "NaN")
+                    #Sell_loss_limit =  df.apply(lambda x: chk_limit("Sell", df['Buy_sl'], df['Sell_sl']) if('Sell_sl_count' - 'Buy_sl_count' == 1) else "NaN")
+
+                    """
+                    #### //add stop loss end// ####
+                    
+                    ### add Buy Sell list ###
+                    
                     
                     ### call count ###
                     df['BS_list'] = Buylist + Selllist
@@ -463,7 +517,7 @@ def create_dash(flask_app):
                         df['chk_repeat'] = bs_count(df,df['a'], df['as1'], 1)
                     else:
                         df['chk_repeat'] = 0
-                        
+                         
                     ### Final Buy & Sell  
                     Buy = np.where((T_Buy == df['Close']) & 
                                     (df['chk_repeat'] != 5) &                 
@@ -477,27 +531,33 @@ def create_dash(flask_app):
                                     ((df['as1'] == 0) | (df['as1'] == -1)), 
                                     df.Close, "NaN")
                     
-                    
-                    # total Buy/Buy count
+
+                    #### add Buy Sell to df
                     Buy_list = list(Buy)
                     df_Buy = pd.DataFrame(Buy_list, columns=['Buy'])
                     #df_Buy = df_Buy.T
                     df = pd.concat([df, df_Buy], axis=1)
+                    
+                    Sell_list = list(Sell)
+                    df_Sell = pd.DataFrame(Sell_list, columns=['Sell'])
+                    #df_Sell = df_Sell.T
+                    df = pd.concat([df, df_Sell], axis=1)
+                    
+                    
+
+                    
+                    
+                    # total Buy/Buy count
+
                     df['Buy_zero'] = np.where(df.Buy == "NaN", 0, df.Buy)
                     tot_buy = np.add.accumulate(df['Buy_zero'].astype(float))
                 
                     df['Buy_count_tmp'] = np.where(df['Buy'] == 'NaN', 0, 1)
                     df['Buy_count'] = np.add.accumulate(df['Buy_count_tmp'])
-                    """
-                    df['Buy_count_compare'] = np.where(df['Buy'] == 'NaN', np.nan, 1)
-                    Buy_tot_count = df['Buy_count_compare'].count()
-                    """
+
                     # total SELL/count
                 
-                    Sell_list = list(Sell)
-                    df_Sell = pd.DataFrame(Sell_list, columns=['Sell'])
-                    #df_Sell = df_Sell.T
-                    df = pd.concat([df, df_Sell], axis=1)
+
                     df['Sell_zero'] = np.where(df.Sell == "NaN", 0, df.Sell)
                     tot_sell = np.add.accumulate(df['Sell_zero'].astype(float))
                 
@@ -516,7 +576,7 @@ def create_dash(flask_app):
                     Buy_count =  Buy_count.iloc[-1]
                     Sell_count =  Sell_count.iloc[-1]
                     
-                    df.to_csv("maxminline.csv")
+                    df.to_csv("renko_rl.csv")
                     
                     return tot_buy, tot_sell, Buy_count, Sell_count, Buy, Sell, 
 
@@ -567,13 +627,22 @@ def create_dash(flask_app):
 
                 figure = go.Figure(
                     data = [
-                            go.Scattergl(x=df.index, y=df.Close, line=dict(color='#fc0080', width=1.5),
+                            go.Scattergl(x=df.index, y=df.Close, line=dict(color='#FFC300', width=1.5),
                             name = 'Close',
                             hoverinfo = 'text',
                             hovertext =
                             '<b>Time</b>: ' + df.Datetime.astype(str) + '<br>' +
                             '<b>Price</b>: ' + [f'{x:,.2f}' for x in df.Close] + '<br>'),
-                           go.Scattergl(x=df.index, y=df.MA10, line=dict(color='#AA76DB', width=1),
+                            
+                            go.Candlestick(x=df.index,
+                                open=df['Open'],
+                                high=df['High'],
+                                low=df['Low'],
+                                close=df['Close'],
+                                increasing={'line_width': 1, 'line_color': "#de0740", 'fillcolor': "#de0740"},
+                                decreasing={'line_width': 1, 'line_color': '#04bd1c', 'fillcolor': '#04bd1c'}),
+
+                            go.Scattergl(x=df.index, y=df.MA10, line=dict(color='#AA76DB', width=1),
                                 name = 'MA10',
                                 hoverinfo = 'text',
                                 hovertext =
@@ -860,6 +929,8 @@ def create_dash(flask_app):
                 [
                  Output('tot_profit', 'children'),
                  Output('tot_long', 'children'),
+                 Output('profit_t', 'children'),
+                 Output('Img_t', 'children'),
                  Output('buy_nplist', 'children'),
                  Output('sell_nplist', 'children'),
                 ],
@@ -920,44 +991,16 @@ def create_dash(flask_app):
                     #sell -> buy
 
                     print("total", tot_profit, tot_long)
-
+                    profit_t = float(tot_long + tot_profit)
 
                 ###### Calculate profit FINISH
 
-                return [tot_profit, tot_long, buy_nplist, sell_nplist]
+                return [html.H6('{0:,.2f}'.format(tot_profit),style = {'color': '#bebfd6', 'font-size':'12px', 'margin-top': '8px'},),
+                        html.H6('{0:,.2f}'.format(tot_long),style = {'color': '#bebfd6', 'font-size':'12px', 'margin-top': '8px'},),
+                        html.H6('{0:,.2f}'.format(profit_t),style =  {'color': '#f20540', 'fontSize' : 17, 'margin-top': '11px'},),
+                        html.Img(id = "Img_t",src = app.get_asset_url('money-bag.png'), style = {'height': '30px'},className = 'coin'), 
+                        buy_nplist, sell_nplist]
  
-
-        @app.callback([Output('profit', 'children'),
-                       Output('Img', 'children'),
-                       ],
-                      [Input('update_value', 'n_intervals'),
-                       Input('tot_profit', 'children'),
-                       Input('tot_long', 'children'),
-                       ])
-        @cache.memoize(timeout=timeout)
-        def profit(n_intervals, tot_profit, tot_long):
-
-            if n_intervals == 0:
-                raise PreventUpdate
-            else:
-                #sell_gain = Decimal(str(tot_long)).quantize(Decimal('0.01'))
-                #buy_gain = Decimal(str(tot_profit)).quantize(Decimal('0.01'))
-                profit = float(tot_long) + float(tot_profit)
-
-
-                if (profit > 0):
-                        return [
-                                html.H6('${0:,.2f}'.format(profit),style = {'color': '#f20540', 'fontSize' : 17, 'margin-top': '11px'}),
-                                html.Img(id = "Img",src = app.get_asset_url('money-bag.png'),
-                                     style = {'height': '30px'},
-                                     className = 'coin'), ]
-
-                else:
-                        return [
-                            html.H6('${0:,.2f}'.format(profit),style = {'color': '#f20540', 'fontSize' : 17, 'margin-top': '11px'}),
-                            html.Img(id = "Img",src = app.get_asset_url('cry.png'),
-                                     style = {'height': '30px'},
-                                     className = 'coin'), ]
 
 
         @app.callback(
